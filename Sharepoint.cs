@@ -3,11 +3,10 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Web;
+using System.Net;
 
 namespace Sharepoint2Aria {
     public class Sharepoint {
-        public string initial_url_;
-        public Uri real_url_;
         public string relpath_base_;  // "/personal/.../Documents/...";
         public string relpath_base_uid_;
         public bool relpath_base_isfile_;
@@ -28,6 +27,7 @@ namespace Sharepoint2Aria {
                 throw new Exception($"HTTP request timed out: ${url}");
             }
             HttpResponseMessage rsp = reqTask.Result;
+            // TODO handle 503, too fast?
             if (rsp.StatusCode != System.Net.HttpStatusCode.OK) {
                 Console.WriteLine(rsp);
                 Console.WriteLine(rsp.Content.ReadAsStringAsync().Result);
@@ -39,6 +39,20 @@ namespace Sharepoint2Aria {
             return jd.RootElement;
         }
 
+        private static string GetFedAuthCookieFromResponse(HttpResponseMessage rsp) {
+            Regex re = new Regex(@"FedAuth=([0-9a-zA-Z/+]+)");
+            foreach (var cookie in rsp.Headers) {
+                if (cookie.Key != "Set-Cookie") continue;
+                foreach (string val in cookie.Value) {
+                    MatchCollection ms = re.Matches(val);
+                    if (ms.Count == 0) continue;
+                    Match m = ms[0];
+                    return m.Groups[1].ToString();
+                }
+            }
+            return "";
+        }
+
         public Sharepoint(string url) {
             // Check URL format
             // f for folder, i for item?
@@ -47,9 +61,8 @@ namespace Sharepoint2Aria {
             if (matches.Count == 0) {
                 throw new ArgumentException($"Invalid url: ${url}");
             }
-            initial_url_ = url;
 
-            // HTTP request
+            // Make initial request
             var client_handler = new HttpClientHandler();
             client_handler.AllowAutoRedirect = false;
             HttpClient client = new HttpClient(client_handler);
@@ -59,47 +72,48 @@ namespace Sharepoint2Aria {
                 throw new Exception($"HTTP request timed out: ${url}");
             }
             HttpResponseMessage rsp = httpGetTask.Result;
-            if (rsp.StatusCode != System.Net.HttpStatusCode.Found) {
+            if (rsp.StatusCode != HttpStatusCode.Found && rsp.StatusCode != HttpStatusCode.OK) {
                 throw new Exception($"Unexpected HTTP status code: {rsp.StatusCode} url={url}");
             }
-            real_url_ = rsp.Headers.Location ?? throw new Exception("HTTP 302 not contain new location");
 
-            // Extract server relative path
-            var relpath = System.Web.HttpUtility.ParseQueryString(real_url_.Query)["id"];
-            relpath_base_ = relpath ?? throw new Exception("New location isn't expected " + real_url_);
-
-            // Construct API path
-            string s = real_url_.ToString();
-            int pos = s.IndexOf("/_layouts/");
-            if (pos < 0) throw new Exception("Unexpected url: " + s);
-            api_ = s.Substring(0, pos) + "/_api";
-
-            // Extract FedAuth
-            fedauth_ = "";
-            re = new Regex(@"FedAuth=([0-9a-zA-Z/+]+)");
-            foreach (var cookie in rsp.Headers) {
-                if (cookie.Key != "Set-Cookie") continue;
-                foreach (string val in cookie.Value) {
-                    MatchCollection ms = re.Matches(val);
-                    if (ms.Count == 0) continue;
-                    Match m = ms[0];
-                    fedauth_ = m.Groups[1].ToString();
-                }
+            // Links without password redirect us directly.
+            else if (rsp.StatusCode == HttpStatusCode.Found) {
+                Uri real_url = rsp.Headers.Location ?? throw new Exception("HTTP 302 not contain new location");
+                // Extract server relative path
+                var relpath = System.Web.HttpUtility.ParseQueryString(real_url.Query)["id"];
+                relpath_base_ = relpath ?? throw new Exception("New location isn't expected " + real_url);
+                // Construct API path
+                string s = real_url.ToString();
+                int pos = s.IndexOf("/_layouts/");
+                if (pos < 0) throw new Exception("Unexpected url: " + s);
+                api_ = s.Substring(0, pos) + "/_api";
+                // Extract FedAuth
+                fedauth_ = GetFedAuthCookieFromResponse(rsp);
             }
+
+            // Links with password returns a input page.
+            else if (rsp.StatusCode == HttpStatusCode.OK) {
+                // TODO
+                throw new Exception("Password link not supported");
+            } else {
+                throw new Exception("What's wrong with the compiler?");
+            }
+
+            // Check FedAuth
             if (fedauth_ == "") {
                 throw new Exception("Cannot find FedAuth in response");
             }
 
-            // Print cookie valid date
-            // string decodedfedauth = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(fedauth_));
-            // DateTime startTime = DateTime.FromFileTime(Int64.Parse(decodedfedauth.Split("|")[4].Split(",")[1]));
-            // DateTime endTime = DateTime.FromFileTime(Int64.Parse(decodedfedauth.Split("|")[4].Split(",")[3]));
-            // Console.WriteLine($"Valid since: {startTime.ToString()}");
-            // Console.WriteLine($"Now time:    {DateTime.Now.ToString()}");
-            // Console.WriteLine($"Valid until: {endTime.ToString()}");
+            // Print cookie time
+            string decodedfedauth = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(fedauth_));
+            DateTime time1 = DateTime.FromFileTime(Int64.Parse(decodedfedauth.Split("|")[4].Split(",")[1]));
+            DateTime time2 = DateTime.FromFileTime(Int64.Parse(decodedfedauth.Split("|")[4].Split(",")[3]));
+            Console.WriteLine($"Now time:      {DateTime.Now.ToString()}");
+            Console.WriteLine($"Cookie time 1: {time1.ToString()}");
+            Console.WriteLine($"Cookie time 2: {time2.ToString()}");
 
             // Get base uid
-            url = $"{api_}/web/GetSharingLinkData(@Link)?@Link='{HttpUtility.UrlEncode(initial_url_)}'";
+            url = $"{api_}/web/GetSharingLinkData(@Link)?@Link='{HttpUtility.UrlEncode(url)}'";
             var ret = HttpGet(url);
             string debugjson = JsonSerializer.Serialize(ret, new JsonSerializerOptions() { WriteIndented = true });
             relpath_base_uid_ = ret.GetProperty("ObjectUniqueId").GetString() ?? throw new Exception("bad uid: " + debugjson);

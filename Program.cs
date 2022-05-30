@@ -39,7 +39,6 @@ namespace Sharepoint2Aria {
             aria2.Ping();
 
             Sharepoint sp = new Sharepoint(od_url);
-            Console.WriteLine($"Location: {sp.real_url_}");
             Console.WriteLine($"RelPath:  {sp.relpath_base_}");
             Console.WriteLine($"Api:      {sp.api_}");
             Console.WriteLine($"Cookie:   FedAuth={sp.fedauth_}");
@@ -64,7 +63,7 @@ namespace Sharepoint2Aria {
             if (select_files) {
                 bool ok = false;
                 while (!ok) {
-                    Console.Write("Select files for download (e.g. 1,3,5-7 or all or exit):");
+                    Console.Write("Select files for download (e.g. 1,3,5-7 or all or exit): ");
                     Console.Out.Flush();
                     string? input = Console.ReadLine();
                     if (input == null || input == "exit") return;
