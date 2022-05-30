@@ -7,7 +7,6 @@ using System.Net;
 
 namespace Sharepoint2Aria {
     public class Sharepoint {
-        public string relpath_base_;  // "/personal/.../Documents/...";
         public string relpath_base_uid_;
         public bool relpath_base_isfile_;
         public string api_; // "https://...sharepoint.com/personal/.../_api";
@@ -53,7 +52,7 @@ namespace Sharepoint2Aria {
             return "";
         }
 
-        public Sharepoint(string url) {
+        public Sharepoint(string url, string passwd) {
             // Check URL format
             // f for folder, i for item?
             Regex re = new Regex(@"^https://[a-z-]+\.sharepoint\.com/:(i|f):/g/personal/.*$");
@@ -63,11 +62,15 @@ namespace Sharepoint2Aria {
             }
 
             // Make initial request
+            var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Add("Accept", "*/*");
+            req.Headers.Add("User-Agent", "curl/7.83.1");
+
             var client_handler = new HttpClientHandler();
             client_handler.AllowAutoRedirect = false;
             HttpClient client = new HttpClient(client_handler);
             Console.WriteLine("Waiting for the FedAuth cookie...");
-            var httpGetTask = client.GetAsync(url);
+            var httpGetTask = client.SendAsync(req);
             if (!httpGetTask.Wait(new TimeSpan(0, 0, 5))) {
                 throw new Exception($"HTTP request timed out: ${url}");
             }
@@ -81,7 +84,6 @@ namespace Sharepoint2Aria {
                 Uri real_url = rsp.Headers.Location ?? throw new Exception("HTTP 302 not contain new location");
                 // Extract server relative path
                 var relpath = System.Web.HttpUtility.ParseQueryString(real_url.Query)["id"];
-                relpath_base_ = relpath ?? throw new Exception("New location isn't expected " + real_url);
                 // Construct API path
                 string s = real_url.ToString();
                 int pos = s.IndexOf("/_layouts/");
@@ -93,8 +95,61 @@ namespace Sharepoint2Aria {
 
             // Links with password returns a input page.
             else if (rsp.StatusCode == HttpStatusCode.OK) {
-                // TODO
-                throw new Exception("Password link not supported");
+                // Extract hidden form fields.
+                string html = rsp.Content.ReadAsStringAsync().Result;
+                System.IO.File.WriteAllText("aaa.txt", html);
+                Regex input_re = new Regex(@"<input .* name=""([^""]+)"" .* value=""([^""]*)"" />");
+                MatchCollection mc = input_re.Matches(html);
+                Dictionary<string, string> form_values = new Dictionary<string, string>();
+                foreach (Match m in mc) {
+                    form_values.Add(m.Groups[1].ToString(), m.Groups[2].ToString());
+                    //Console.WriteLine(m.Groups[1].ToString() + " = " + m.Groups[2].ToString());
+                }
+                var expected_fields = new HashSet<string>() { "SideBySideToken", "__VIEWSTATE", "__VIEWSTATEGENERATOR", "__VIEWSTATEENCRYPTED", "__EVENTVALIDATION" };
+                if (!expected_fields.SetEquals(form_values.Keys)) {
+                    throw new Exception("Unexpected pwd input page");
+                }
+
+                // Construct the guestaccess.aspx link
+                Regex aspx_re = new Regex(@"action=""(.*guestaccess.aspx[^""]+)""");
+                string part = aspx_re.Match(html).Groups[1].ToString().Replace("&amp;", "&");
+                int hostname_idx = url.IndexOf("sharepoint.com");
+                string guestaccess_url = $"{url.Substring(0, hostname_idx)}sharepoint.com{part}";
+                //Console.WriteLine("GuestAccess: " + guestaccess_url);
+
+                // Ask user for passwd
+                while (passwd == "") {
+                    Console.Write("Input password for protected link: ");
+                    Console.Out.Flush();
+                    passwd = Console.ReadLine() ?? throw new Exception("User cancelled");
+                }
+                form_values.Add("txtPassword", passwd);
+
+                // Request w/passwd
+                HttpRequestMessage guestaccess_req = new HttpRequestMessage(HttpMethod.Post, guestaccess_url);
+                guestaccess_req.Headers.Add("Accept", "*/*");
+                guestaccess_req.Headers.Add("User-Agent", "curl/7.83.1");
+                guestaccess_req.Content = new FormUrlEncodedContent(form_values);
+
+                HttpClient guestaccess_client = new HttpClient(new HttpClientHandler() { AllowAutoRedirect = true });
+                var guestaccess_task = guestaccess_client.SendAsync(guestaccess_req);
+                if (!httpGetTask.Wait(new TimeSpan(0, 0, 5))) {
+                    throw new Exception($"HTTP request timed out: ${guestaccess_url}");
+                }
+                HttpResponseMessage guestaccess_rsp = guestaccess_task.Result;
+                if (guestaccess_rsp.StatusCode != HttpStatusCode.Found && guestaccess_rsp.StatusCode != HttpStatusCode.OK) {
+                    throw new Exception($"Unexpected HTTP status code: {guestaccess_rsp.StatusCode} url={guestaccess_url}");
+                }
+
+                fedauth_ = GetFedAuthCookieFromResponse(guestaccess_rsp);
+                if (fedauth_ == "") {
+                    throw new Exception("Wrong password.");
+                }
+
+                int pos = guestaccess_url.IndexOf("/_layouts/");
+                if (pos < 0) throw new Exception("Unexpected url: " + guestaccess_url);
+                api_ = guestaccess_url.Substring(0, pos) + "/_api";
+
             } else {
                 throw new Exception("What's wrong with the compiler?");
             }

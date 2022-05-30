@@ -38,8 +38,7 @@ namespace Sharepoint2Aria {
             AriaRpcClient aria2 = new AriaRpcClient(rpc_url, rpc_secret);
             aria2.Ping();
 
-            Sharepoint sp = new Sharepoint(od_url);
-            Console.WriteLine($"RelPath:  {sp.relpath_base_}");
+            Sharepoint sp = new Sharepoint(od_url, od_pwd);
             Console.WriteLine($"Api:      {sp.api_}");
             Console.WriteLine($"Cookie:   FedAuth={sp.fedauth_}");
             Console.WriteLine($"UniqueId: {sp.relpath_base_uid_}");
