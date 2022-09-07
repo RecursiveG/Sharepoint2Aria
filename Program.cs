@@ -7,6 +7,7 @@ namespace Sharepoint2Aria {
             string rpc_secret = "";
             string od_url = "";
             string od_pwd = "";
+            string scan_only = "";
             bool print_help = false;
             bool select_files = false;
 
@@ -20,6 +21,8 @@ namespace Sharepoint2Aria {
                     rpc_secret = args.ElementAt(++i);
                 } else if (arg == "--rpc-url") {
                     rpc_url = args.ElementAt(++i);
+                } else if (arg == "--scan-only") {
+                    scan_only = args.ElementAt(++i);
                 } else if (od_url == "") {
                     od_url = arg;
                 } else {
@@ -29,6 +32,7 @@ namespace Sharepoint2Aria {
 
             if (print_help || od_url == "") {
                 Console.WriteLine("Sharepoint2Aria.exe [options] <share_link> [share_password]");
+                Console.WriteLine("    --scan-only <url>       Only scan this subfolder.");
                 Console.WriteLine("    --rpc-url <string>      Aria2 RPC URL. Default: http://[::1]:6800");
                 Console.WriteLine("    --rpc-secret <string>   Aria2 RPC secret.");
                 Console.WriteLine("    --select-files          Interactively prompt for files to download.");
@@ -41,8 +45,12 @@ namespace Sharepoint2Aria {
             Sharepoint sp = new Sharepoint(od_url, od_pwd);
             Console.WriteLine($"Api:      {sp.api_}");
             Console.WriteLine($"Cookie:   FedAuth={sp.fedauth_}");
+            if (scan_only != "") {
+                sp.ChangeBaseRelPath(scan_only);
+            }
             Console.WriteLine($"UniqueId: {sp.relpath_base_uid_}");
             Console.WriteLine($"Type:     " + (sp.relpath_base_isfile_ ? "File" : "Folder"));
+
             var files = sp.ListFiles();
             files.Sort((a, b) => {
                 string apath = string.Join("/", a.PathComponents);
@@ -50,7 +58,13 @@ namespace Sharepoint2Aria {
                 return apath.CompareTo(bpath);
             });
 
-            Console.WriteLine($"\n\nFound {files.Count} files:");
+
+            if (files.Count == 0) {
+                Console.WriteLine($"\n\nFound {files.Count} files. Exit...");
+                return;
+            } else {
+                Console.WriteLine($"\n\nFound {files.Count} files:");
+            }
             for (int i = 0; i < files.Count; i++) {
                 string path = "/" + string.Join("/", files[i].PathComponents);
                 Console.WriteLine($"[{i,3}] {path}");

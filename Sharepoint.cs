@@ -22,15 +22,15 @@ namespace Sharepoint2Aria {
 
             HttpClient client = new HttpClient(client_handler);
             var reqTask = client.SendAsync(req);
-            if (!reqTask.Wait(new TimeSpan(0, 0, 5))) {
-                throw new Exception($"HTTP request timed out: ${url}");
+            if (!reqTask.Wait(new TimeSpan(0, 0, 10))) {
+                throw new Exception($"HTTP request timed out: {url}");
             }
             HttpResponseMessage rsp = reqTask.Result;
             // TODO handle 503, too fast?
             if (rsp.StatusCode != System.Net.HttpStatusCode.OK) {
                 Console.WriteLine(rsp);
                 Console.WriteLine(rsp.Content.ReadAsStringAsync().Result);
-                throw new Exception($"Unexpected HTTP status code: ${rsp.StatusCode}");
+                throw new Exception($"Unexpected HTTP status code: {rsp.StatusCode}");
             }
 
             string rsp_body = rsp.Content.ReadAsStringAsync().Result;
@@ -97,7 +97,6 @@ namespace Sharepoint2Aria {
             else if (rsp.StatusCode == HttpStatusCode.OK) {
                 // Extract hidden form fields.
                 string html = rsp.Content.ReadAsStringAsync().Result;
-                System.IO.File.WriteAllText("aaa.txt", html);
                 Regex input_re = new Regex(@"<input .* name=""([^""]+)"" .* value=""([^""]*)"" />");
                 MatchCollection mc = input_re.Matches(html);
                 Dictionary<string, string> form_values = new Dictionary<string, string>();
@@ -179,6 +178,42 @@ namespace Sharepoint2Aria {
                 relpath_base_isfile_ = false;
             } else {
                 throw new Exception("invalid type: " + debugjson);
+            }
+        }
+
+        public void ChangeBaseRelPath(string url) {
+            Uri u = new Uri(url);
+            // Extract server relative path
+            var relpath = System.Web.HttpUtility.ParseQueryString(u.Query)["id"];
+            relpath = relpath ?? throw new Exception("Scan-only path missing id param: " + url);
+            Console.WriteLine("Explicit relpath: " + relpath);
+            relpath = relpath.Replace("'", "''");
+            relpath = Uri.EscapeDataString(relpath);
+
+            // Try folder
+            string apiurl = $"{api_}/web/GetFolderByServerRelativePath(decodedUrl='{relpath}')";
+            // Console.WriteLine(apiurl);
+            try {
+                var ret = HttpGet(apiurl);
+                string debugjson = JsonSerializer.Serialize(ret, new JsonSerializerOptions() { WriteIndented = true });
+                relpath_base_uid_ = ret.GetProperty("UniqueId").GetString() ?? throw new Exception("bad uid: " + debugjson);
+                relpath_base_isfile_ = false;
+                return;
+            } catch (Exception ex) {
+                if (ex.Message != "Unexpected HTTP status code: NotFound") {
+                    throw;
+                }
+            }
+
+            // Try file
+            {
+                apiurl = $"{api_}/web/GetFileByServerRelativePath(decodedUrl='{relpath}')";
+                // Console.WriteLine(apiurl);
+                var ret = HttpGet(apiurl);
+
+                string debugjson = JsonSerializer.Serialize(ret, new JsonSerializerOptions() { WriteIndented = true });
+                relpath_base_uid_ = ret.GetProperty("UniqueId").GetString() ?? throw new Exception("bad uid: " + debugjson);
+                relpath_base_isfile_ = true;
             }
         }
 
