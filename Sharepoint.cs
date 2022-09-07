@@ -55,10 +55,10 @@ namespace Sharepoint2Aria {
         public Sharepoint(string url, string passwd) {
             // Check URL format
             // f for folder, i for item?
-            Regex re = new Regex(@"^https://[a-z-]+\.sharepoint\.com/:(i|f):/g/personal/.*$");
+            Regex re = new Regex(@"^https://[a-z0-9-]+\.sharepoint\.com/:(i|f):/g/personal/.*$");
             MatchCollection matches = re.Matches(url);
             if (matches.Count == 0) {
-                throw new ArgumentException($"Invalid url: ${url}");
+                Console.WriteLine("Irregular URL. Error may occur: " + url);
             }
 
             // Make initial request
