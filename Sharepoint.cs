@@ -39,7 +39,7 @@ namespace Sharepoint2Aria {
         }
 
         private static string GetFedAuthCookieFromResponse(HttpResponseMessage rsp) {
-            Regex re = new Regex(@"FedAuth=([0-9a-zA-Z/+]+)");
+            Regex re = new Regex(@"FedAuth=([0-9a-zA-Z/+]+=*)");
             foreach (var cookie in rsp.Headers) {
                 if (cookie.Key != "Set-Cookie") continue;
                 foreach (string val in cookie.Value) {
@@ -84,9 +84,12 @@ namespace Sharepoint2Aria {
                 Uri real_url = rsp.Headers.Location ?? throw new Exception("HTTP 302 not contain new location");
                 // Extract server relative path
                 var relpath = System.Web.HttpUtility.ParseQueryString(real_url.Query)["id"];
-                // Construct API path
+                // Construct API path, two possible redirect format
                 string s = real_url.ToString();
                 int pos = s.IndexOf("/_layouts/");
+                if (pos < 0) {
+                    pos = s.IndexOf("/Shared Documents/");
+                }
                 if (pos < 0) throw new Exception("Unexpected url: " + s);
                 api_ = s.Substring(0, pos) + "/_api";
                 // Extract FedAuth

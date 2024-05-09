@@ -2,3 +2,5 @@ bin
 obj
 .vscode
 *.txt
+*.sh
+*.sln

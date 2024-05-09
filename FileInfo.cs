@@ -10,6 +10,7 @@ namespace Sharepoint2Aria {
                 throw new Exception("Invalid server_relpath: " + server_relpath);
             }
             int domain_len = api_url.IndexOf("/personal/");
+            if (domain_len < 0) domain_len = api_url.IndexOf("/sites/");
             if (domain_len < 0) {
                 throw new Exception("Invalid API url: " + api_url);
             }
